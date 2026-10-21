@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dead Wing</title>
+<style>
+:root{--bg:#07090a;--panel:#10161a;--ink:#cfe0d8;--dim:#6d8279;--red:#c0392b;--grn:#4fae7f;--amb:#d9a441;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;user-select:none;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font-family:Georgia,'Times New Roman',serif}
+#app{max-width:560px;margin:0 auto;height:100%;display:flex;flex-direction:column;padding:10px;gap:8px;position:relative}
+.bar{height:14px;background:#000;border:1px solid #223;border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;width:100%;transition:width .12s}
+#hp i{background:var(--grn)} #ehp i{background:var(--red)} #cd i{background:var(--amb);transition:none}
+.row{display:flex;justify-content:space-between;font-size:13px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+#stage{flex:1;min-height:200px;position:relative;border:1px solid #1b2a2e;border-radius:6px;overflow:hidden;cursor:crosshair;background:radial-gradient(ellipse at 50% 30%,#1a2a28 0,#0a1011 70%);animation:fl 5s infinite}
+@keyframes fl{0%,92%,96%,100%{filter:brightness(1)}93%{filter:brightness(.45)}94%{filter:brightness(1.2)}95%{filter:brightness(.6)}}
+#stage::after{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse,transparent 45%,#000 120%)}
+#enemy{position:absolute;left:50%;bottom:6%;height:78%;transform:translateX(-50%)}
+#enemy svg{height:100%;display:block}
+.shake{animation:sh .18s}
+@keyframes sh{25%{transform:translateX(-52%)}75%{transform:translateX(-48%)}}
+#flash{position:absolute;inset:0;background:var(--red);opacity:0;pointer-events:none;transition:opacity .35s}
+#ename{position:absolute;top:8px;left:0;right:0;text-align:center;font-size:15px;z-index:2}
+#windup{position:absolute;bottom:0;left:0;height:4px;background:var(--red);z-index:2;width:0}
+.dmg{position:absolute;font-weight:bold;color:#fff;pointer-events:none;animation:fy .7s forwards;z-index:3;text-shadow:0 0 4px #000}
+@keyframes fy{to{transform:translateY(-50px);opacity:0}}
+#log{font-size:13px;color:var(--dim);min-height:34px;font-style:italic}
+#inv{display:flex;gap:6px;flex-wrap:wrap}
+#inv div,.btn,.card{background:var(--panel);border:1px solid #243238;border-radius:5px;padding:8px 10px;font-size:13px}
+#inv button{flex:1;min-width:90px;background:var(--panel);color:var(--ink);border:1px solid #2d4a45;border-radius:5px;padding:10px 6px;font:inherit;font-size:13px;cursor:pointer}
+#inv button:disabled{opacity:.35}
+#ov{position:absolute;inset:0;background:rgba(3,5,6,.94);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;z-index:10;overflow:auto}
+#ov h1{margin:0;font-size:34px;letter-spacing:.12em;color:var(--red)}
+#ov p{max-width:420px;color:var(--dim);line-height:1.5;margin:0}
+.btn{cursor:pointer;color:var(--ink);font:inherit;font-size:15px;padding:12px 22px;border-color:var(--red)}
+.card{cursor:pointer;width:100%;max-width:400px;text-align:left}
+.card b{color:var(--amb)} .card small{display:block;color:var(--dim);margin-top:3px}
+</style></head><body>
+<div id="app">
+ <div class="row"><span id="floor"></span><span id="enc"></span></div>
+ <div class="bar" id="hp"><i></i></div>
+ <div class="row"><span id="hpt"></span><span id="gear"></span></div>
+ <div id="stage"><div id="ename"></div><div id="enemy"></div><div id="windup"></div><div id="flash"></div></div>
+ <div class="bar" id="ehp"><i></i></div>
+ <div class="bar" id="cd"><i style="width:0"></i></div>
+ <div id="log"></div>
+ <div id="inv"></div>
+ <div id="ov"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id), R=(a,b)=>a+Math.random()*(b-a);
+const FLOORS=['6 · Psychiatric Ward','5 · Surgery','4 · Intensive Care','3 · Maternity','2 · Morgue Annex','1 · Lobby'];
+const TYPES=[['Patient','#7d8fa8'],['Nurse','#5f9c98'],['Orderly','#6a8f6a'],['Surgeon','#4f7f5a'],['Janitor','#8f8a5a'],['Guard','#5a6a8f']];
+const STAGE_NAME=['','','Something wearing a ',''];
+const WEAPONS=[
+ {n:'Steel Pipe',t:'w',d:6,c:.45,s:'6 dmg · fast'},
+ {n:'Scalpel',t:'w',d:3.5,c:.2,s:'3.5 dmg · very fast, crits'},
+ {n:'Bone Saw',t:'w',d:11,c:.5,s:'11 dmg · quick'},
+ {n:'Fire Axe',t:'w',d:20,c:.85,s:'20 dmg · slow, heavy'},
+ {n:'Cleaver',t:'w',d:14,c:.6,s:'14 dmg · balanced'}];
+const ARMOR=[
+ {n:'Surgical Apron',t:'a',r:.12,s:'-12% damage'},
+ {n:'Lead X-ray Vest',t:'a',r:.3,s:'-30% damage'},
+ {n:'Riot Gear',t:'a',r:.45,s:'-45% damage'}];
+const CONS=[
+ {n:'Medkit',t:'c',k:'med',s:'Heal 40 HP'},
+ {n:'Adrenaline',t:'c',k:'adr',s:'Attack 2× faster for 8s'},
+ {n:'Flashbang',t:'c',k:'fb',s:'Stun enemy 4s'}];
+let G;
+function newGame(){G={fl:0,en:0,hp:100,w:WEAPONS[0],a:null,inv:{med:1,adr:0,fb:0},cd:0,adr:0,state:'idle',e:null}}
+function spawn(){
+ const i=G.fl,last=G.en==2,m=[1,1.2,1.7][G.en];
+ const t=TYPES[Math.floor(Math.random()*TYPES.length)];
+ const hp=Math.round((30+i*15)*m);
+ let st=1; if(i>=4&&Math.random()<.5)st=2; if(i==5&&last)st=2;
+ const e={name:t[0],col:t[1],max:hp,hp:hp,stage:1,wind:0,stun:0,i:i,boss:last};
+ e.stage=st; if(st==2)e.hp=Math.round(hp*.6); G.e=e; e.hp=Math.min(e.hp,hp);
+ G.state='fight'; render(true);
+ log(last?'Something large is breathing behind the door…':'Footsteps. It doesn’t blink.');
+}
+const DMG=[0,5,9,14],INT=[0,2.2,1.6,1.1];
+function stageOf(e){const r=e.hp/e.max;return r>.66?1:r>.33?2:3}
+function art(e){
+ const s=e.stage,sk=['','#c9b8a6','#9aa58a','#586b50'][s],cl=e.col;
+ let b='';
+ if(s==1) b=`<rect x="70" y="95" width="60" height="85" rx="8" fill="${cl}"/><rect x="72" y="175" width="22" height="70" fill="#222"/><rect x="106" y="175" width="22" height="70" fill="#222"/>
+ <rect x="48" y="100" width="18" height="75" rx="8" fill="${sk}"/><rect x="134" y="100" width="18" height="75" rx="8" fill="${sk}"/>
+ <circle cx="100" cy="68" r="28" fill="${sk}"/><circle cx="90" cy="64" r="5" fill="#fff"/><circle cx="110" cy="64" r="5" fill="#fff"/><circle cx="90" cy="64" r="1.5" fill="#000"/><circle cx="110" cy="64" r="1.5" fill="#000"/><path d="M88 82 Q100 90 112 82" stroke="#400" stroke-width="2" fill="none"/>`;
+ else if(s==2) b=`<g transform="rotate(-6 100 150)"><rect x="68" y="100" width="64" height="80" rx="10" fill="${cl}"/><path d="M68 110 l12 20 -10 6z M132 120 l-8 30 8 -6z" fill="${sk}" opacity=".6"/>
+ <rect x="72" y="175" width="22" height="70" fill="#222"/><rect x="106" y="175" width="26" height="70" fill="#1a1a1a" transform="rotate(8 118 175)"/>
+ <rect x="50" y="104" width="16" height="70" rx="8" fill="${sk}"/><path d="M134 104 L168 200 L176 250 L162 252 L150 205 Z" fill="${sk}"/><path d="M168 240 l-8 20 M175 242 l2 20 M162 242 l-12 16" stroke="#222" stroke-width="3"/>
+ <ellipse cx="100" cy="70" rx="30" ry="32" fill="${sk}"/><circle cx="88" cy="62" r="6" fill="#e8e0a0"/><circle cx="112" cy="58" r="8" fill="#e8e0a0"/><circle cx="112" cy="58" r="2" fill="#000"/><circle cx="88" cy="62" r="2" fill="#000"/><circle cx="102" cy="48" r="3" fill="#e8e0a0"/>
+ <path d="M80 84 Q100 112 122 84 Z" fill="#300"/><path d="M86 86 v8 M96 88 v10 M106 88 v10 M116 86 v8" stroke="#ddd" stroke-width="2"/></g>`;
+ else b=`<g transform="translate(0 20)"><path d="M55 120 Q100 60 150 120 L160 190 L45 190 Z" fill="${sk}"/><path d="M60 110 l-8 -28 14 20 M85 90 l-4 -34 12 28 M115 88 l6 -34 6 34 M140 105 l16 -26 -6 32" fill="#2f3b2b"/>
+ <path d="M50 130 L18 230 L24 262 L40 250 L56 160Z" fill="${sk}"/><path d="M150 130 L182 230 L176 262 L160 250 L144 160Z" fill="${sk}"/><path d="M20 250 l-6 14 M26 252 l2 14 M174 250 l6 14 M180 252 l-2 14" stroke="#111" stroke-width="3"/>
+ <rect x="75" y="185" width="20" height="55" fill="#1b1f19"/><rect x="108" y="185" width="20" height="55" fill="#1b1f19"/>
+ <ellipse cx="100" cy="110" rx="26" ry="22" fill="${sk}"/><circle cx="88" cy="104" r="4" fill="#ff5030"/><circle cx="100" cy="98" r="3" fill="#ff5030"/><circle cx="112" cy="104" r="4" fill="#ff5030"/><circle cx="94" cy="112" r="2" fill="#ff5030"/><circle cx="108" cy="112" r="2" fill="#ff5030"/>
+ <path d="M76 120 Q100 150 126 120 Z" fill="#200"/><path d="M80 121 l4 12 4-11 4 14 4-14 4 14 4-14 4 14 4-12 4 10" stroke="#e8e8d8" stroke-width="2.5" fill="none"/></g>`;
+ return `<svg viewBox="0 0 200 270">${b}</svg>`;
+}
+function ename(e){const n=e.name;return e.stage==1?n:e.stage==2?n+' — turning':'What was once a '+n.toLowerCase()}
+function render(full){
+ if(!G.e)return;
+ if(full){$('enemy').innerHTML=art(G.e);}
+ $('ename').textContent=ename(G.e)+(G.e.boss?' ☠':'');
+ $('floor').textContent='Floor '+FLOORS[G.fl];
+ $('enc').textContent='Threat '+(G.en+1)+'/3';
+ $('hp').firstChild.style.width=Math.max(0,G.hp)+'%';
+ $('hpt').textContent='HP '+Math.max(0,Math.round(G.hp))+'/100';
+ $('gear').textContent=G.w.n+' · '+(G.a?G.a.n:'No armor');
+ $('ehp').firstChild.style.width=(G.e.hp/G.e.max*100)+'%';
+ inv();
+}
+function inv(){
+ const I=G.inv;
+ $('inv').innerHTML=CONS.map((c,i)=>`<button ${I[c.k]>0&&G.state=='fight'?'':'disabled'} onclick="use('${c.k}')">[${i+1}] ${c.n} ×${I[c.k]}</button>`).join('');
+}
+function log(t){$('log').textContent=t}
+function use(k){
+ if(G.state!='fight'||G.inv[k]<1)return;
+ G.inv[k]--;
+ if(k=='med'){G.hp=Math.min(100,G.hp+40);log('You pressure the wound and keep moving. +40 HP');}
+ if(k=='adr'){G.adr=8;log('Your heart is a drum. Faster!');}
+ if(k=='fb'){G.e.stun=4;G.e.wind=0;log('White light. It screams and claws at its eyes.');}
+ render();
+}
+function pop(txt,x,y,c){const d=document.createElement('div');d.className='dmg';d.textContent=txt;d.style.left=x+'px';d.style.top=y+'px';if(c)d.style.color=c;$('stage').appendChild(d);setTimeout(()=>d.remove(),700)}
+function attack(ev){
+ if(G.state!='fight'||G.cd>0)return;
+ const e=G.e,r=$('stage').getBoundingClientRect();
+ const x=(ev&&ev.clientX?ev.clientX-r.left:r.width/2)+R(-20,20),y=(ev&&ev.clientY?ev.clientY-r.top:r.height/2)-20;
+ let d=G.w.d*R(.85,1.15),crit=Math.random()<(G.w.n=='Scalpel'?.3:.08);
+ if(crit)d*=2.2; d=Math.max(1,Math.round(d));
+ e.hp-=d; G.cd=G.w.c*(G.adr>0?.5:1);
+ pop(d+(crit?'!':''),x,y,crit?'#d9a441':null);
+ const en=$('enemy');en.classList.remove('shake');void en.offsetWidth;en.classList.add('shake');
+ const ns=stageOf(e);
+ if(ns>e.stage){e.stage=ns;render(true);log(ns==2?'Its bones crack and shift. This is not a person anymore — not entirely.':'The skin tears open. It SCREAMS in a voice that isn’t human.');e.wind=Math.max(0,e.wind-.5);}
+ if(e.hp<=0){kill();return}
+ render();
+}
+function kill(){
+ G.state='between';
+ const last=G.en==2;
+ if(!last){G.en++;log('It stops moving. You don’t look at it for long.');setTimeout(spawn,1100);G.e.hp=0;render();return}
+ if(G.fl==5){win();return}
+ setTimeout(loot,700);
+}
+function loot(){
+ const pool=[...WEAPONS,...ARMOR,...CONS,CONS[0],CONS[0],CONS[2]].filter(x=>x.n!=G.w.n&&(!G.a||x.n!=G.a.n));
+ const pick=[];while(pick.length<3){const x=pool[Math.floor(Math.random()*pool.length)];if(!pick.includes(x))pick.push(x)}
+ G.state='loot';
+ ov(`<h1 style="font-size:24px;color:var(--ink)">Stairwell cleared</h1><p>A supply closet, door ajar. You can only carry one thing. Choose carefully — nothing else will save you.</p>`+
+  pick.map((x,i)=>`<div class="card" onclick="take(${WEAPONS.concat(ARMOR,CONS).indexOf(x)})"><b>${x.n}</b> <small>${x.s}${x.t=='w'?' (replaces '+G.w.n+')':x.t=='a'?(G.a?' (replaces '+G.a.n+')':''):''}</small></div>`).join(''));
+}
+function take(i){
+ const x=WEAPONS.concat(ARMOR,CONS)[i];
+ if(x.t=='w')G.w=x;else if(x.t=='a')G.a=x;else G.inv[x.k]++;
+ ov(null);G.fl++;G.en=0;G.hp=Math.min(100,G.hp+5);
+ log('You descend. The air gets colder.');setTimeout(spawn,600);
+}
+function ov(h){const o=$('ov');if(h===null){o.style.display='none';return}o.innerHTML=h;o.style.display='flex'}
+function die(){G.state='dead';ov(`<h1>YOU DIED</h1><p>Floor ${FLOORS[G.fl]}.<br>The thing that killed you stood over you a while. Then it started to look like someone you knew.</p><button class="btn" onclick="start()">Try again</button>`)}
+function win(){G.state='won';ov(`<h1 style="color:var(--grn)">YOU ESCAPED</h1><p>Cold air. Rain. Behind you, the lobby doors swing shut — and from the upper floors, the sound of something learning to walk again.</p><button class="btn" onclick="start()">Play again</button>`)}
+function start(){ov(null);newGame();G.state='between';setTimeout(spawn,300)}
+function title(){newGame();ov(`<h1>DEAD WING</h1><p>You wake on the top floor of St. Aldren’s. The lights are failing. The staff are still here — but something is wrong with how they move.</p><p>Hit them. Don’t stop. They change as they get hurt. There are no levels to gain: only what you find in the dark will keep you alive.</p><p style="color:var(--ink)">Click / tap the stage to attack · keys 1-3 use items<br>Descend six floors to the exit.</p><button class="btn" onclick="start()">Enter the hospital</button>`)}
+let last=performance.now();
+function loop(t){
+ const dt=Math.min(.1,(t-last)/1000);last=t;
+ if(G&&G.state=='fight'){
+  const e=G.e;
+  if(G.cd>0)G.cd=Math.max(0,G.cd-dt);
+  if(G.adr>0)G.adr-=dt;
+  $('cd').firstChild.style.width=(G.cd>0?G.cd/(G.w.c*(G.adr>0?.5:1))*100:0)+'%';
+  if(e.stun>0){e.stun-=dt}else{
+   e.wind+=dt;
+   const iv=INT[e.stage];
+   $('windup').style.width=Math.min(100,e.wind/iv*100)+'%';
+   if(e.wind>=iv){
+    e.wind=0;
+    let d=DMG[e.stage]*(1+e.i*.12)*R(.85,1.15)*(e.boss?1.25:1);
+    d*=1-(G.a?G.a.r:0);d=Math.round(d);
+    G.hp-=d;
+    $('flash').style.opacity=.45;setTimeout(()=>$('flash').style.opacity=0,120);
+    pop('-'+d,R(60,200),R(20,80),'#ff6050');
+    if(G.hp<=0){G.hp=0;render();die()}else render();
+   }
+  }
+ }
+ requestAnimationFrame(loop);
+}
+$('stage').addEventListener('pointerdown',attack);
+addEventListener('keydown',e=>{if(e.key=='1')use('med');if(e.key=='2')use('adr');if(e.key=='3')use('fb');if(e.code=='Space'){e.preventDefault();attack()}});
+title();requestAnimationFrame(loop);
+</script></body></html>
